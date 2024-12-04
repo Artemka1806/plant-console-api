@@ -25,6 +25,7 @@ class User(Document):
         del d["_id"]
         del d["verification_code"]
         del d["password"]
+        d["created_at"] = d["created_at"].replace(tzinfo=datetime.timezone.utc).timestamp()
         if d.get("plants"):
             d["plants"] = [str(plant) for plant in d["plants"]]
         else:

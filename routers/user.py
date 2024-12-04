@@ -4,28 +4,34 @@ from os import getenv
 
 import bcrypt
 from bson import ObjectId
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi import HTTPException
 from dotenv import load_dotenv
+import jwt
 from pydantic import BaseModel
 
 from models import User, Plant
 
 load_dotenv()
 
-BCRYPT_SALT = getenv("BCRYPT_SALT")
+JWT_SECRET = getenv("JWT_SECRET")
 
 router = APIRouter(prefix="/v1", tags=["user"])
 
 
-class UserCreate(BaseModel):
+class UserRegister(BaseModel):
     name: str
     email: str
     password: str
 
 
-@router.post("/user")
-async def create_user(u: UserCreate):
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+@router.post("/user/register")
+async def create_user(u: UserRegister):
     """
     Create a user.
     """
@@ -33,30 +39,45 @@ async def create_user(u: UserCreate):
     if user:
         raise HTTPException(status_code=409, detail="User already exists")
     
-    salt = bytes(BCRYPT_SALT, "utf-8")
-    hashed_password = bcrypt.hashpw(bytes(u.password, "utf-8"), salt)
+    hashed_password = bcrypt.hashpw(bytes(u.password, "utf-8"), bcrypt.gensalt())
     user = User(name=u.name, email=u.email, password=hashed_password, verification_code=int(''.join(random.choices(string.digits, k=5))))
     await user.commit()
     return await user.get_dict()
 
 
-@router.get("/user/{id}")
-async def get_user(id: str):
+@router.post("/user/login")
+async def login_user(u: UserLogin):
+    """
+    Login a user.
+    """
+    user = await User.find_one({"email": u.email})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not bcrypt.checkpw(bytes(u.password, "utf-8"), bytes(user.password, "utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    return {"access_token": jwt.encode(await user.get_dict(), JWT_SECRET)}
+    
+
+
+@router.get("/user")
+async def get_user(request: Request):
     """
     Retrieve a user by its ID.
     """
-    user = await User.find_one({"_id": ObjectId(id)})
+    user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return await user.get_dict()
 
 
-@router.post("/user/{id}/verify")
-async def verify_user(id: str, verification_code: int):
+@router.post("/user/verify")
+async def verify_user(verification_code: int, request: Request):
     """
     Verify a user's email with a verification code.
     """
-    user = await User.find_one({"_id": ObjectId(id)})
+    user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -68,12 +89,12 @@ async def verify_user(id: str, verification_code: int):
     return await user.get_dict()
 
 
-@router.put("/user/{id}/plant")
-async def append_plant(id: str, plant_code: str):
+@router.put("/user/plant")
+async def append_plant(plant_code: str, request: Request):
     """
     Append a plant to a user's list of plants.
     """
-    user = await User.find_one({"_id": ObjectId(id)})
+    user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -93,12 +114,12 @@ async def append_plant(id: str, plant_code: str):
     return await user.get_dict()
 
 
-@router.get("/user/{id}/plants")
-async def get_user_plants(id: str):
+@router.get("/user/plant")
+async def get_user_plants(id: str, request: Request):
     """
     Retrieve a user's list of plants.
     """
-    user = await User.find_one({"_id": ObjectId(id)})
+    user = getattr(request.state, "user", None)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
