@@ -1,25 +1,41 @@
 import random
 import string
+from os import getenv
 
+import bcrypt
 from bson import ObjectId
 from fastapi import APIRouter
 from fastapi import HTTPException
+from dotenv import load_dotenv
+from pydantic import BaseModel
 
 from models import User, Plant
+
+load_dotenv()
+
+BCRYPT_SALT = getenv("BCRYPT_SALT")
 
 router = APIRouter(prefix="/v1", tags=["user"])
 
 
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
 @router.post("/user")
-async def create_user(name: str, email: str):
+async def create_user(u: UserCreate):
     """
     Create a user.
     """
-    user = await User.find_one({"email": email})
+    user = await User.find_one({"email": u.email})
     if user:
         raise HTTPException(status_code=409, detail="User already exists")
     
-    user = User(name=name, email=email, verification_code=int(''.join(random.choices(string.digits, k=5))))
+    salt = bytes(BCRYPT_SALT, "utf-8")
+    hashed_password = bcrypt.hashpw(bytes(u.password, "utf-8"), salt)
+    user = User(name=u.name, email=u.email, password=hashed_password, verification_code=int(''.join(random.choices(string.digits, k=5))))
     await user.commit()
     return await user.get_dict()
 
